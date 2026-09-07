@@ -1,0 +1,186 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  passwordHash  String
+  avatarUrl     String?
+  role          String    @default("MEMBER") // SYSTEM_ADMIN or MEMBER
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workspacesOwned     Workspace[]       @relation("WorkspaceOwner")
+  workspaceMemberships WorkspaceMember[]
+  projectsOwned       Project[]         @relation("ProjectOwner")
+  projectMemberships  ProjectMember[]
+  tasksCreated        Task[]            @relation("TaskCreator")
+  tasksAssigned       Task[]            @relation("TaskAssignee")
+  comments            Comment[]
+  activityLogs        ActivityLog[]
+}
+
+model Workspace {
+  id          String            @id @default(cuid())
+  name        String
+  slug        String            @unique
+  ownerId     String
+  owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     WorkspaceMember[]
+  projects    Project[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String    @default("MEMBER") // OWNER, ADMIN, MEMBER, VIEWER
+  joinedAt    DateTime  @default(now())
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model Project {
+  id          String          @id @default(cuid())
+  workspaceId String
+  name        String
+  key         String          // e.g. "NOV"
+  description String?
+  status      String          @default("ACTIVE") // PLANNING, ACTIVE, ON_HOLD, COMPLETED, ARCHIVED
+  priority    String          @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  startDate   DateTime?
+  targetDate  DateTime?
+  ownerId     String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  owner       User            @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members     ProjectMember[]
+  tasks       Task[]
+  tags        Tag[]
+  activityLogs ActivityLog[]
+}
+
+model ProjectMember {
+  id          String    @id @default(cuid())
+  projectId   String
+  userId      String
+  role        String    @default("MEMBER") // ADMIN, MEMBER, VIEWER
+  joinedAt    DateTime  @default(now())
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+}
+
+model Task {
+  id             String        @id @default(cuid())
+  projectId      String
+  taskNumber     Int           // Incremental per project, e.g., 1 -> NOV-1
+  title          String
+  description    String?
+  status         String        @default("TODO") // BACKLOG, TODO, IN_PROGRESS, IN_REVIEW, DONE
+  priority       String        @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  orderIndex     Float         @default(1000.0) // Fractional index for drag & drop
+  dueDate        DateTime?
+  estimatedHours Int?
+  actualHours    Int?
+  creatorId      String
+  assigneeId     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  project        Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator        User          @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  assignee       User?         @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  subtasks       Subtask[]
+  comments       Comment[]
+  tags           TaskTag[]
+  activityLogs   ActivityLog[]
+
+  @@index([projectId, status, orderIndex])
+  @@index([projectId, assigneeId])
+  @@index([projectId, dueDate])
+  @@unique([projectId, taskNumber])
+}
+
+model Subtask {
+  id          String    @id @default(cuid())
+  taskId      String
+  title       String
+  isCompleted Boolean   @default(false)
+  orderIndex  Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+model Comment {
+  id        String    @id @default(cuid())
+  taskId    String
+  authorId  String
+  content   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+}
+
+model ActivityLog {
+  id          String    @id @default(cuid())
+  projectId   String
+  taskId      String?
+  userId      String
+  action      String    // TASK_CREATED, STATUS_CHANGED, ASSIGNEE_CHANGED, PRIORITY_CHANGED, COMMENT_ADDED, SUBTASK_TOGGLED
+  details     String    // JSON string description or payload
+  createdAt   DateTime  @default(now())
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task        Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([taskId])
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  projectId String
+  name      String
+  color     String    @default("#6366f1")
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks     TaskTag[]
+
+  @@index([projectId])
+  @@unique([projectId, name])
+}
+
+model TaskTag {
+  taskId String
+  tagId  String
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+}
