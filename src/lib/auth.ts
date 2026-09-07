@@ -4,16 +4,17 @@ import { cookies } from "next/headers";
 import { NextRequest } from "next/server";
 import { SessionUser } from "@/types";
 
-// P0 SECURITY: Never use a fallback secret — crash if JWT_SECRET is absent
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET || JWT_SECRET.length < 32) {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("FATAL: JWT_SECRET environment variable is missing or too short (min 32 chars)");
+export function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    // Only throw in runtime production when not in Next.js build phase
+    if (process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build") {
+      throw new Error("FATAL: JWT_SECRET environment variable is missing or too short (min 32 chars). Set JWT_SECRET in your Vercel/production environment variables.");
+    }
+    return "nova-dev-only-insecure-secret-do-not-use-in-production!!";
   }
-  // In development, warn but allow a default for convenience
-  console.warn("⚠️  WARNING: JWT_SECRET not set. Using insecure default. Set JWT_SECRET in .env for security.");
+  return secret;
 }
-const EFFECTIVE_JWT_SECRET = JWT_SECRET || "nova-dev-only-insecure-secret-do-not-use-in-production!!";
 export const TOKEN_COOKIE_NAME = "nova_token";
 
 export interface JwtPayload {
@@ -43,14 +44,14 @@ export function signToken(user: SessionUser): string {
       avatarUrl: user.avatarUrl,
       role: user.role,
     },
-    EFFECTIVE_JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: "7d" }
   );
 }
 
 export function verifyToken(token: string): JwtPayload | null {
   try {
-    return jwt.verify(token, EFFECTIVE_JWT_SECRET) as JwtPayload;
+    return jwt.verify(token, getJwtSecret()) as JwtPayload;
   } catch {
     return null;
   }
